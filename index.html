@@ -76,21 +76,24 @@ if(loc&&part&&localityParty[norm(loc)]&&localityParty[norm(loc)]!==party(part))a
 if(moduleName==='relevantes'){let del=norm(g('DELITO')),mod=norm(g('MODALIDAD'));if(del==='femicidio')add(r,'DELITO','revisar','Femicidio no figura como categoría según criterio comunicado','Seleccionar Homicidio en HERMES; preservar la información en el extracto');if(mod==='asalta en finca')add(r,'MODALIDAD','revisar','Posible error: Asalta en Finca','Verificar categoría Asalto en finca');if(mod==='escruche en finca')add(r,'MODALIDAD','revisar','Denominación potencialmente no normalizada','Verificar si la categoría HERMES es Escruche')}
 const checkCatalog=(field,items)=>{let v=g(field);if(!v)return;let exact=items.includes(v);if(exact){if(field==='MODALIDAD'&&MODALIDAD_SUGERENCIAS[norm(v)])add(r,field,'revisar','Opción existente en HERMES con posible error ortográfico de origen','Opción alternativa disponible: '+MODALIDAD_SUGERENCIAS[norm(v)]);return}let aliases={'av. de ilicito':'Averiguación de ilícito','av de ilicito':'Averiguación de ilícito','averiguacion ilicito':'Averiguación de ilícito','femicidio':'Homicidio'};let alias=aliases[norm(v)];if(alias&&items.includes(alias)){add(r,field,'error','No existe esta denominación en el catálogo de HERMES','Usar: '+alias);return}let near=items.filter(x=>norm(x)===norm(v));if(near.length)add(r,field,'revisar','Difiere en tildes o mayúsculas de una opción real de HERMES','Usar: '+near[0]);else{let cl=closest(v,items);add(r,field,'revisar','No figura exactamente en el catálogo informado de HERMES',cl?'¿Quiso decir? '+cl:'Revisar catálogo y relato; no cambiar automáticamente')}};
 if(moduleName==='relevantes'){checkCatalog('DELITO',CAT_DELITOS);checkCatalog('MODALIDAD',CAT_MODALIDADES)}else checkCatalog('CARATULA',CAT_PROCEDIMIENTOS);
-// Jurisdicción: identificar la unidad comunicante explícita, no la jurisdicción territorial.
+// Jurisdicción: comparar con la dependencia que figura tras "Adelanto" en el encabezado.
 if(moduleName==='relevantes' && extract){
   const j=g('JURISDICCION');
-  const first=extract.slice(0,320).replace(/\s+/g,' ');
-  const adelanto=first.match(/\bAdelanto\s+(.+?)(?=\s+-\s+|(?:\s+(?:Robo|Hurto|Homicidio|Lesiones|Abuso|Tentativa|Inf\.|Aprehendido|Personal policial)\b)|$)/i);
-  const comunicante=adelanto?adelanto[1].trim().replace(/[.,;\s]+$/,''):'';
+  const first=extract.slice(0,400).replace(/\s+/g,' ');
+  const adelanto=first.match(/\bAdelanto\s+(.+)/i);
+  const rest=adelanto?adelanto[1]:'';
+  const STOP=/\s+(?:-\s|Av\.?\s|Averiguaci|Robo\b|Hurto\b|Homicidio\b|Lesiones\b|Abuso\b|Tentativa\b|Ttva\b|Inf\.|Aprehendid|Personal policial|Estafa\b|Asalto\b|Hallazgo\b|Abandono\b|Amenaza|Da[ñn]o\b|Privaci|Suicidio\b|Incendio\b|Evasi|Intimidaci|Extorsi|Usurpaci|Violaci|Violencia\b|Femicidio\b|P\.?I\.?L\b|Efectivo|Masculino|Femenina|Menor\b)/i;
+  const cut=rest.search(STOP);
+  const comunicante=(cut>0?rest.slice(0,cut):rest.slice(0,60)).trim().replace(/[.,;\s]+$/,'');
   const normalUnidad=v=>norm(v).replace(/\bcria\b/g,'comisaria').replace(/\bcomisaria\b/g,'cria').replace(/[.]/g,'').replace(/\s+/g,' ').trim();
   if(j && /^(cria\.?\s*(?:\d+(?:ra|da|ta|to)?\.?)?)$/i.test(j))
     add(r,'JURISDICCION','error','Dependencia incompleta: falta identificación de unidad y/o localidad',comunicante?'Sugerido: '+comunicante:'Identificar dependencia comunicante');
-  if(j && comunicante && normalUnidad(j)!==normalUnidad(comunicante) &&
-     !r.issues.some(x=>x.field==='JURISDICCION')){
+  else if(j && comunicante && !normalUnidad(rest).startsWith(normalUnidad(j)) && normalUnidad(j)!==normalUnidad(comunicante))
     add(r,'JURISDICCION','revisar','El encabezado identifica otra dependencia comunicante','Revisar: '+comunicante);
-  }
+  if(/[àèìòù]/i.test(j))add(r,'JURISDICCION','revisar','Acento grave (`) en lugar de agudo (´)','Usar: '+j.replace(/à/g,'á').replace(/è/g,'é').replace(/ì/g,'í').replace(/ò/g,'ó').replace(/ù/g,'ú'));
   r.comunicante=comunicante;
 }
+for(const k of ['PARTIDO','LOCALIDAD']){const v=g(k);if(/[àèìòù]/i.test(v))add(r,k,'revisar','Acento grave (`) en lugar de agudo (´)','Usar: '+v.replace(/à/g,'á').replace(/è/g,'é').replace(/ì/g,'í').replace(/ò/g,'ó').replace(/ù/g,'ú'))}
 
 let point=parseCoord(coords);r.point=point;if(coords&&!point)add(r,'COORDENADAS','error','Formato de coordenadas no reconocido','Usar latitud, longitud en grados decimales');if(point){let [lat,lon]=point;if(Math.abs(lat)>90||Math.abs(lon)>180)add(r,'COORDENADAS','error','Coordenadas fuera del rango terrestre');else if(lat>0||lon>0)add(r,'COORDENADAS','error','Coordenadas incompatibles con Buenos Aires (signo positivo)');else if(lat < -42||lat > -33||lon < -64||lon > -56)add(r,'COORDENADAS','revisar','Coordenadas fuera del rango aproximado de Provincia de Buenos Aires','Verificar lugar y signos');if(lat===0||lon===0)add(r,'COORDENADAS','error','Coordenada cero sospechosa')}
 r.status=r.issues.some(i=>i.severity==='error')?'error':r.issues.length?'revisar':'ok';return r}
@@ -108,6 +111,7 @@ function briefIssue(i){
  if(/cartografía no devuelve|partido no aparece/i.test(msg))return 'UBICACIÓN: Revisar mapa';
  if(/Dependencia incompleta/.test(msg))return 'JURISDICCIÓN: Dependencia incompleta';
  if(/encabezado identifica otra dependencia/.test(msg))return 'JURISDICCIÓN: Comparar con encabezado';
+ if(/Acento grave/.test(msg))return field+': Acento grave → agudo';
  if(/PU duplicado/.test(msg))return 'PU: Posible duplicado';
  if(/saltos de línea/.test(msg))return 'EXTRACTO: Saltos de línea';
  if(/carácter extraño/.test(msg))return 'EXTRACTO: Texto mal separado';
